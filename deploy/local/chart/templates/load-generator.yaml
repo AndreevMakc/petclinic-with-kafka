@@ -1,0 +1,63 @@
+{{- if .Values.loadGenerator.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: petclinic-load-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: petclinic-load-generator
+  template:
+    metadata:
+      labels:
+        app: petclinic-load-generator
+        admission.datadoghq.com/enabled: "false"
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: load-generator
+          # Reuse the cached Petclinic image for its curl; no Java process starts.
+          image: springcommunity/spring-petclinic-api-gateway:{{ .Values.imageTag }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              success=0
+              failure=0
+              cycles=0
+              while true; do
+                for path in /api/customer/owners /api/customer/owners/6 /api/gateway/owners/6 /api/vet/vets '/api/visit/pets/visits?petId=7'; do
+                  if curl --fail --silent --show-error --connect-timeout 3 --max-time 8 \
+                    --output /dev/null "http://api-gateway:8080$path"; then
+                    success=$((success + 1))
+                  else
+                    failure=$((failure + 1))
+                    printf 'Request failed: %s\n' "$path" >&2
+                  fi
+                done
+                cycles=$((cycles + 1))
+                if [ "$cycles" -eq 10 ]; then
+                  {{- $kafka := .Values.kafka | default dict }}
+                  {{- if $kafka.applicationsEnabled }}
+                  if curl --fail --silent --show-error --connect-timeout 3 --max-time 15 \
+                    --header 'Content-Type: application/json' --data '{"description":"Kafka lab load"}' \
+                    --output /dev/null http://api-gateway:8080/api/visit/owners/6/pets/7/visits; then # gitleaks:allow -- fixed local URL
+                    success=$((success + 1))
+                  else
+                    failure=$((failure + 1))
+                    printf 'Visit creation failed\n' >&2
+                  fi
+                  {{- end }}
+                  printf 'requests_ok=%s requests_failed=%s\n' "$success" "$failure"
+                  cycles=0
+                fi
+                sleep 1
+              done
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 96Mi
+{{- end }}

@@ -1,0 +1,36 @@
+imageTag: "3.4.1"
+datadogEnabled: false
+javaTracerVersion: "v1.67.1"
+loadGenerator:
+  enabled: false
+kafka:
+  enabled: false
+  applicationsEnabled: false
+  image: apache/kafka:3.9.1
+  storage: 2Gi
+  applicationImageTag: "3.4.1-kafka2"
+postgresql:
+  enabled: false
+  image: postgres:17.8
+  storage: 2Gi
+  applicationImageTag: "3.4.1-postgres1"
+services:
+  - name: config-server
+    port: 8888
+  - name: discovery-server
+    port: 8761
+  - name: customers-service
+    port: 8081
+    database: customers
+    metrics: true
+  - name: visits-service
+    port: 8082
+    database: visits
+    metrics: true
+  - name: vets-service
+    port: 8083
+    database: vets
+    metrics: true
+  - name: api-gateway
+    port: 8080
+    metrics: true

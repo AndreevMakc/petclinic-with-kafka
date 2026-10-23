@@ -1,0 +1,124 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: petclinic-postgres-init
+data:
+{{ (.Files.Glob "postgres/*").AsConfig | indent 2 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector:
+    app: petclinic-postgres
+  ports:
+    - name: postgres
+      port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: petclinic-postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app: petclinic-postgres
+  template:
+    metadata:
+      labels:
+        app: petclinic-postgres
+        tags.datadoghq.com/env: local
+        tags.datadoghq.com/service: petclinic-postgres
+        tags.datadoghq.com/version: "17.8"
+        admission.datadoghq.com/enabled: "false"
+      annotations:
+        ad.datadoghq.com/postgres.logs: '[{"source":"postgresql","service":"petclinic-postgres"}]'
+        ad.datadoghq.com/postgres.checks: >-
+          {"postgres":{"init_config":{},"instances":[
+          {{- range $i, $db := list "customers" "vets" "visits" }}
+          {{ if $i }},{{ end }}{"host":"%%host%%","port":5432,"username":"datadog","password":"%%env_PETCLINIC_POSTGRES_MONITOR_PASSWORD%%","dbname":"{{ $db }}","dbm":true,"tags":["env:local","service:petclinic-postgres"]}
+          {{- end }}]}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: postgres
+          image: {{ .Values.postgresql.image }}
+          args:
+            - -c
+            - shared_preload_libraries=pg_stat_statements
+            - -c
+            - track_activity_query_size=4096
+            - -c
+            - pg_stat_statements.track=all
+            - -c
+            - pg_stat_statements.max=10000
+            - -c
+            - pg_stat_statements.track_utility=off
+            - -c
+            - track_io_timing=on
+            - -c
+            - compute_query_id=on
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: petclinic-postgres
+                  key: admin-password
+            {{- range $name := list "customers" "vets" "visits" "monitor" }}
+            - name: {{ $name | upper }}_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: petclinic-postgres
+                  key: {{ $name }}-password
+            {{- end }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 768Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d/00-init.sh
+              subPath: 00-init.sh
+              readOnly: true
+            - name: init
+              mountPath: /petclinic-init
+              readOnly: true
+      volumes:
+        - name: init
+          configMap:
+            name: petclinic-postgres-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ .Values.postgresql.storage }}
+{{- end }}

@@ -1,0 +1,12 @@
+Petclinic with Kafka
+Based on Spring Petclinic Microservices v3.4.1:
+https://github.com/spring-petclinic/spring-petclinic-microservices
+Copyright belongs to the respective upstream contributors. Licensed under Apache-2.0.
+
+Local Spring Cloud configuration files derive from:
+https://github.com/spring-petclinic/spring-petclinic-microservices-config
+Commit 323993ce2519c6d02df63e08bf4458d123d3b611, Apache-2.0.
+
+Modified distribution: Kafka visit events, transactional outbox, deduplicated
+notifications, local Kubernetes/PostgreSQL deployment, load generation and
+Datadog instrumentation. Original notices and source headers are retained.

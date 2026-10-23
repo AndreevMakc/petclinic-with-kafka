@@ -1,0 +1,12 @@
+spring:
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: ${PETCLINIC_POSTGRES_URL}
+    username: ${PETCLINIC_POSTGRES_USER}
+    password: ${PETCLINIC_POSTGRES_PASSWORD}
+  sql:
+    init:
+      mode: never
+  jpa:
+    hibernate:
+      ddl-auto: validate

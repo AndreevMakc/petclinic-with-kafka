@@ -1,0 +1,132 @@
+{{- range .Values.services }}
+{{- $kafka := $.Values.kafka | default dict }}
+{{- $messaging := and ($kafka.applicationsEnabled | default false) (has .name (list "customers-service" "visits-service")) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+spec:
+  selector:
+    app: {{ .name }}
+  ports:
+    - name: http
+      port: {{ .port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name }}
+  labels:
+    tags.datadoghq.com/env: local
+    tags.datadoghq.com/service: petclinic-{{ .name }}
+    tags.datadoghq.com/version: {{ $.Values.imageTag | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .name }}
+        tags.datadoghq.com/env: local
+        tags.datadoghq.com/service: petclinic-{{ .name }}
+        tags.datadoghq.com/version: {{ $.Values.imageTag | quote }}
+        admission.datadoghq.com/enabled: {{ $.Values.datadogEnabled | quote }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/config.yaml") $ | sha256sum }}
+        {{- if $.Values.datadogEnabled }}
+        admission.datadoghq.com/java-lib.version: {{ $.Values.javaTracerVersion | quote }}
+        {{- end }}
+        ad.datadoghq.com/app.logs: '[{"source":"java","service":"petclinic-{{ .name }}"}]'
+        {{- if .metrics }}
+        ad.datadoghq.com/app.checks: >-
+          {"openmetrics":{"init_config":{},"instances":[{"openmetrics_endpoint":"http://%%host%%:{{ .port }}/actuator/prometheus","namespace":"petclinic","metrics":[".*"],"max_returned_metrics":2000,"tags":["service:petclinic-{{ .name }}","env:local","version:{{ $.Values.imageTag }}"]}]}}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: app
+          {{- if $messaging }}
+          image: petclinic-local/{{ .name }}:{{ $kafka.applicationImageTag }}
+          imagePullPolicy: Never
+          {{- else if and $.Values.postgresql.enabled .database }}
+          image: petclinic-local/{{ .name }}:{{ $.Values.postgresql.applicationImageTag }}
+          imagePullPolicy: Never
+          {{- else }}
+          image: springcommunity/spring-petclinic-{{ .name }}:{{ $.Values.imageTag }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .port }}
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ if eq .name "config-server" }}"native"{{ else if $messaging }}"docker,postgresql,kafka"{{ else if and $.Values.postgresql.enabled .database }}"docker,postgresql"{{ else }}"docker"{{ end }}
+            {{- if $messaging }}
+            - name: DD_DATA_STREAMS_ENABLED
+              value: "true"
+            {{- end }}
+            {{- if and $.Values.postgresql.enabled .database }}
+            - name: PETCLINIC_POSTGRES_URL
+              value: jdbc:postgresql://postgres:5432/{{ .database }}?ApplicationName=petclinic-{{ .name }}
+            - name: PETCLINIC_POSTGRES_USER
+              value: {{ .database }}
+            - name: DD_DBM_PROPAGATION_MODE
+              value: full
+            - name: DD_TRACE_JDBC_DATASOURCE_ENABLED
+              value: "true"
+            - name: PETCLINIC_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: petclinic-postgres
+                  key: {{ .database }}-password
+            {{- end }}
+            - name: SERVER_PORT
+              value: {{ .port | quote }}
+            - name: GIT_REPO
+              value: /config
+            - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
+              value: health,info,metrics,prometheus
+            - name: MANAGEMENT_TRACING_ENABLED
+              value: "false"
+            - name: JAVA_TOOL_OPTIONS
+              value: -Xms128m -Xmx384m
+            - name: DD_RUNTIME_METRICS_ENABLED
+              value: "true"
+            - name: DD_LOGS_INJECTION
+              value: "true"
+            - name: LOGGING_PATTERN_CORRELATION
+              value: "[dd.service=%X{dd.service} dd.env=%X{dd.env} dd.version=%X{dd.version} dd.trace_id=%X{dd.trace_id} dd.span_id=%X{dd.span_id}] "
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: "2"
+              memory: 768Mi
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          {{- if eq .name "config-server" }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: petclinic-config
+          {{- end }}
+{{- end }}

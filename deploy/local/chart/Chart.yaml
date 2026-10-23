@@ -1,0 +1,6 @@
+apiVersion: v2
+name: petclinic-local
+description: Local Petclinic services for Datadog evaluation
+type: application
+version: 0.1.0
+appVersion: "3.4.1"

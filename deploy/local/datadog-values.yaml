@@ -1,0 +1,36 @@
+datadog:
+  site: datadoghq.eu
+  apiKeyExistingSecret: datadog-api-key
+  clusterName: petclinic-colima
+  tags:
+    - env:local
+    - project:petclinic
+  # Local k3s uses a self-signed kubelet certificate.
+  kubelet:
+    tlsVerify: false
+  dockerSocketPath: /var/run/docker.sock
+  logs:
+    enabled: true
+    containerCollectAll: false
+  apm:
+    socketEnabled: true
+  dogstatsd:
+    useSocketVolume: true
+  kubeStateMetricsCore:
+    enabled: true
+clusterAgent:
+  enabled: true
+  admissionController:
+    enabled: true
+    mutateUnlabelled: false
+    configMode: socket
+agents:
+  containers:
+    agent:
+      env:
+        - name: PETCLINIC_POSTGRES_MONITOR_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: petclinic-postgres-monitor
+              key: password
+              optional: true
